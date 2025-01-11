@@ -1,0 +1,319 @@
+<html><head><base href="." /><title>Enhanced Minecraft</title><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #87CEEB;  /* Sky blue background */
+  }
+  
+  #ui {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-size: 14px;
+    text-shadow: 2px 2px 2px rgba(0,0,0,0.5);
+    pointer-events: none;
+  }
+  
+  #inventory {
+    position: fixed;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 5px;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+    border-radius: 5px;
+  }
+  
+  .inv-slot {
+    width: 40px;
+    height: 40px;
+    background: rgba(255,255,255,0.2);
+    border: 2px solid white;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  
+  .inv-slot.selected {
+    background: rgba(255,255,255,0.4);
+    border-color: #ffff00;
+  }
+  
+  .crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  
+  .crosshair::before,
+  .crosshair::after {
+    content: '';
+    position: absolute;
+    background: white;
+  }
+  
+  .crosshair::before {
+    width: 2px;
+    height: 20px;
+    left: 9px;
+  }
+  
+  .crosshair::after {
+    width: 20px;
+    height: 2px;
+    top: 9px;
+  }
+</style></head><body>
+<div id="ui">
+  <div>WASD - Move</div>
+  <div>Click - Place/Remove blocks</div>
+  <div>Space - Jump</div>
+  <div>1-5 - Select block type</div>
+</div>
+
+<div id="inventory">
+  <div class="inv-slot selected" data-type="grass"></div>
+  <div class="inv-slot" data-type="stone"></div>
+  <div class="inv-slot" data-type="wood"></div>
+  <div class="inv-slot" data-type="leaves"></div>
+  <div class="inv-slot" data-type="water"></div>
+</div>
+
+<div class="crosshair"></div>
+
+<script type="module">
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);  // Sky blue background
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// Materials
+const materials = {
+  grass: new THREE.MeshPhongMaterial({ color: 0x55aa55 }),
+  stone: new THREE.MeshPhongMaterial({ color: 0x888888 }),
+  wood: new THREE.MeshPhongMaterial({ color: 0x825201 }),
+  leaves: new THREE.MeshPhongMaterial({ color: 0x225522 }),
+  water: new THREE.MeshPhongMaterial({ 
+    color: 0x0044ff,
+    transparent: true,
+    opacity: 0.6
+  })
+};
+
+let selectedMaterial = materials.grass;
+
+// Create basic world
+const geometry = new THREE.BoxGeometry();
+const groundGeometry = new THREE.BoxGeometry(100, 1, 100);
+const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x55aa55 });
+const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+ground.position.y = -0.5;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Generate some terrain features
+function generateTree(x, z) {
+  const height = 5 + Math.floor(Math.random() * 3);
+  
+  // Trunk
+  for(let y = 0; y < height; y++) {
+    const trunk = new THREE.Mesh(geometry, materials.wood);
+    trunk.position.set(x, y + 0.5, z);
+    trunk.castShadow = true;
+    scene.add(trunk);
+    blocks.push(trunk);
+  }
+  
+  // Leaves
+  for(let ly = height; ly < height + 3; ly++) {
+    for(let lx = -2; lx <= 2; lx++) {
+      for(let lz = -2; lz <= 2; lz++) {
+        if(Math.random() > 0.3) {
+          const leaf = new THREE.Mesh(geometry, materials.leaves);
+          leaf.position.set(x + lx, ly + 0.5, z + lz);
+          leaf.castShadow = true;
+          scene.add(leaf);
+          blocks.push(leaf);
+        }
+      }
+    }
+  }
+}
+
+// Generate some random trees
+let blocks = [];
+for(let i = 0; i < 10; i++) {
+  const x = Math.floor(Math.random() * 80 - 40);
+  const z = Math.floor(Math.random() * 80 - 40);
+  generateTree(x, z);
+}
+
+// Add lighting
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(50, 100, 50);
+light.castShadow = true;
+light.shadow.camera.left = -100;
+light.shadow.camera.right = 100;
+light.shadow.camera.top = 100;
+light.shadow.camera.bottom = -100;
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x404040));
+
+// Player controls
+let moveForward = false;
+let moveBackward = false;
+let moveLeft = false;
+let moveRight = false;
+let canJump = true;
+let velocity = new THREE.Vector3();
+let speed = 5;
+
+camera.position.y = 2;
+
+// Inventory selection
+document.querySelectorAll('.inv-slot').forEach((slot, index) => {
+  slot.addEventListener('click', () => {
+    document.querySelector('.inv-slot.selected').classList.remove('selected');
+    slot.classList.add('selected');
+    selectedMaterial = materials[slot.dataset.type];
+  });
+  
+  // Number keys for quick selection
+  document.addEventListener('keydown', (e) => {
+    if(e.key === (index + 1).toString()) {
+      document.querySelector('.inv-slot.selected').classList.remove('selected');
+      slot.classList.add('selected');
+      selectedMaterial = materials[slot.dataset.type];
+    }
+  });
+});
+
+document.addEventListener('keydown', (event) => {
+  switch(event.code) {
+    case 'KeyW': moveForward = true; break;
+    case 'KeyS': moveBackward = true; break;
+    case 'KeyA': moveLeft = true; break;
+    case 'KeyD': moveRight = true; break;
+    case 'Space': 
+      if(canJump) {
+        velocity.y = 8;
+        canJump = false;
+      }
+      break;
+    case 'ShiftLeft': speed = 8; break;
+  }
+});
+
+document.addEventListener('keyup', (event) => {
+  switch(event.code) {
+    case 'KeyW': moveForward = false; break;
+    case 'KeyS': moveBackward = false; break;
+    case 'KeyA': moveLeft = false; break;
+    case 'KeyD': moveRight = false; break;
+    case 'ShiftLeft': speed = 5; break;
+  }
+});
+
+// Mouse controls for looking around
+document.addEventListener('mousemove', (event) => {
+  if(document.pointerLockElement === document.body) {
+    camera.rotation.y -= event.movementX * 0.002;
+    camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, 
+      camera.rotation.x - event.movementY * 0.002));
+  }
+});
+
+renderer.domElement.addEventListener('click', () => {
+  document.body.requestPointerLock();
+});
+
+// Block placement
+document.addEventListener('mousedown', (event) => {
+  if(document.pointerLockElement === document.body) {
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(), camera);
+    
+    const intersects = raycaster.intersectObjects([ground, ...blocks]);
+    
+    if(intersects.length > 0) {
+      const intersection = intersects[0];
+      
+      if(event.button === 0) { // Left click - place block
+        const cube = new THREE.Mesh(geometry, selectedMaterial);
+        cube.position.copy(intersection.point).add(intersection.face.normal);
+        cube.position.round();
+        cube.castShadow = true;
+        cube.receiveShadow = true;
+        scene.add(cube);
+        blocks.push(cube);
+      } else if(event.button === 2) { // Right click - remove block
+        const object = intersection.object;
+        if(object !== ground) {
+          scene.remove(object);
+          blocks.splice(blocks.indexOf(object), 1);
+        }
+      }
+    }
+  }
+});
+
+// Prevent context menu on right click
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function animate() {
+  requestAnimationFrame(animate);
+  
+  // Update velocity and position
+  velocity.y -= 0.2; // Gravity
+  
+  if(moveForward) {
+    velocity.z = -speed * Math.cos(camera.rotation.y);
+    velocity.x = -speed * Math.sin(camera.rotation.y);
+  } else if(moveBackward) {
+    velocity.z = speed * Math.cos(camera.rotation.y);
+    velocity.x = speed * Math.sin(camera.rotation.y);
+  } else {
+    velocity.z = 0;
+    velocity.x = 0;
+  }
+  
+  if(moveLeft) {
+    velocity.x = -speed * Math.cos(camera.rotation.y);
+    velocity.z = speed * Math.sin(camera.rotation.y);
+  } else if(moveRight) {
+    velocity.x = speed * Math.cos(camera.rotation.y);
+    velocity.z = -speed * Math.sin(camera.rotation.y);
+  }
+  
+  camera.position.add(velocity.multiplyScalar(0.1));
+  
+  // Basic collision detection with ground
+  if(camera.position.y < 2) {
+    camera.position.y = 2;
+    velocity.y = 0;
+    canJump = true;
+  }
+  
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// Handle window resize
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script></body></html>
